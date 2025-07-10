@@ -12,6 +12,8 @@ from datetime import datetime
 from enum import Enum, auto
 from importlib.metadata import metadata
 
+import pynvml
+
 import psutil
 import torch
 import transformers
@@ -112,6 +114,13 @@ class BenchmarkRun:
         self.perf_value = None
         self.tokenizer = None
         self.peak_cpu_mem = 0
+        # power stats
+        self.watt_measures = []
+        self.avg_power = None
+        self.energy_value = None
+        self.samples_energy = None
+        self.tokens_energy = None
+        self.energy_unit_str = ""
         # benchmark stats metadata
         self.count_prompt_tokens = False
         self.token_count_use_max_batch = False
@@ -248,6 +257,17 @@ class BenchmarkRun:
             cpu_mem_usage = (psutil.virtual_memory().used - baseline_cpu_mem_usage) / (1000**2)
             self.peak_cpu_mem = cpu_mem_usage if cpu_mem_usage > self.peak_cpu_mem else self.peak_cpu_mem
             time.sleep(1)
+    
+    # Power sampling for GPUs
+    def nvidia_power_monitor(self):
+        gpu_index = int(os.environ.get('LOCAL_RANK', 0))
+        pynvml.nvmlInit()
+        handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_index)
+        time.sleep(0.5) # Wait for steady state
+        while not self.stop_monitoring:
+            wattage = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000  # Watts
+            self.watt_measures.append(wattage)
+            time.sleep(0.01)
 
     def calc_output_stats(self, output, model, eval_score):
         self.eval_score = eval_score
@@ -293,6 +313,14 @@ class BenchmarkRun:
                     _total_tokens += sum(batch_tokens)
             self.total_tokens = _total_tokens
 
+        # Extract the power metrics
+        if len(self.watt_measures) > 0:
+            self.avg_power = sum(self.watt_measures) / len(self.watt_measures)
+            self.samples_energy = (self.total_samples / self.benchmark_duration) / self.avg_power
+            self.tokens_energy = (self.total_tokens / self.benchmark_duration) / self.avg_power
+        else:
+            print("Warning: No power measurements collected during the benchmark. Check that min power monitor setup time was exceded.")
+        
         if self.total_tokens > 0:
             if not self.count_prompt_tokens:
                 # remove prompt tokens from count of generated tokens
@@ -302,12 +330,17 @@ class BenchmarkRun:
                     logger.info(
                         " Prompt tokens not removed from total tokens generated stats, 'prompt_tokens_lens' not set."
                     )
-
+            # Power metrics
             self.perf_value = self.total_tokens / self.benchmark_duration
             self.perf_unit_str = "Tokens/sec"
+            self.energy_value = self.tokens_energy
+            self.energy_unit_str = "Tokens/joule"
         else:
             self.perf_value = self.total_samples / self.benchmark_duration
             self.perf_unit_str = "Samples/sec"
+            self.energy_value = self.samples_energy
+            self.energy_unit_str = "Samples/joule"
+        
         return self.get_output_stats_dict()
 
     def get_output_stats_dict(self):
@@ -318,6 +351,13 @@ class BenchmarkRun:
             "total_samples": self.total_samples,
             "samples_per_sec": self.total_samples / self.benchmark_duration,
             "tokens_per_sec": self.total_tokens / self.benchmark_duration,
+            
+            # Power sampling
+            "watt_samples": self.watt_measures,
+            "average_wattage": self.avg_power,
+            "samples_per_joule": self.samples_energy,
+            "tokens_per_joule": self.tokens_energy,
+            
             "inference_time_ms": self.benchmark_duration * 1000 / (self.total_samples),
             "evaluation_score": self.eval_score,
             "input_size": self.get_input_shape_str(),
@@ -343,6 +383,12 @@ class BenchmarkRun:
         print(f" Peak host memory usage (MB): {self.peak_cpu_mem:.2f}")
         print(f" Total runtime (s) for {self.total_samples} inputs: {self.benchmark_duration:.4f}")
         print(f" {self.perf_unit_str}: {self.perf_value:.2f}")
+        
+        # Power sampling
+        if len(self.watt_measures) > 0:
+            print(f" Average Power (W): {self.avg_power:.4f}")
+            print(f" {self.energy_unit_str}: {self.energy_value:.2f}")
+
         print(f" Inference time (ms): {(self.benchmark_duration / (self.total_samples)) * 1000:.1f}")
         if self.total_tokens > 0:
             print(f" Total tokens generated: {self.total_tokens}")

@@ -17,9 +17,12 @@ import traceback
 from typing import Any, Callable, Dict, List, Optional
 
 import torch
+import torch.distributed as dist
 import transformers
 from diffusers import StableDiffusionPipeline
 from transformers.tokenization_utils_base import BatchEncoding
+
+import pynvml
 
 # Models
 import benchmark.models.bert.bert
@@ -94,6 +97,8 @@ def run(
     input_data = []
     store_outputs = []
     store_labels = []
+    power_samples = []
+    
     for batch, labels in generator:
         if isinstance(model, transformers.pipelines.Pipeline):
             input_data.append((list(batch), labels))
@@ -198,6 +203,8 @@ def run(
                 output_dir=output_dir,
             )
 
+            power_thread = threading.Thread(target=benchmark_run.nvidia_power_monitor)
+            power_thread.start()
             benchmark_run.start_benchmark_timer()
             for loop in range(loop_count):
                 for batch, labels in inputs:
@@ -224,6 +231,8 @@ def run(
                         store_labels.append(labels)
                         store_outputs.append(output)
             benchmark_run.end_benchmark_timer()
+            benchmark_run.stop_monitoring = True
+            power_thread.join()
             runner.shutdown()
 
             return store_outputs
@@ -446,6 +455,8 @@ def run(
             )
 
         else:
+            power_thread = threading.Thread(target=benchmark_run.nvidia_power_monitor)
+            power_thread.start()
             benchmark_run.start_benchmark_timer()
             if benchmark_run.has_forward_wrapper:
                 for loop in range(args.loop_count):
@@ -464,6 +475,9 @@ def run(
                 output_thread.join()
 
             benchmark_run.end_benchmark_timer()
+            
+            benchmark_run.stop_monitoring = True
+            power_thread.join()
 
         # Combine outputs for data parallel runs
         if os.environ.get("PYBUDA_N300_DATA_PARALLEL", "0") == "1":
@@ -486,6 +500,8 @@ def run(
             }
     else:
         # cuda, CPU, or TT device with pybuda_pipeline implementations
+        power_thread = threading.Thread(target=benchmark_run.nvidia_power_monitor)
+        power_thread.start()
         benchmark_run.start_benchmark_timer()
         with torch.inference_mode():
             for loop in range(args.loop_count):
@@ -511,6 +527,8 @@ def run(
                         store_labels.append(labels)
                         store_outputs.append(output)
         benchmark_run.end_benchmark_timer()
+        benchmark_run.stop_monitoring = True
+        power_thread.join()
 
     # Store model output
     if args.model_output:
@@ -520,6 +538,7 @@ def run(
     eval_score = eval_fn(outputs=store_outputs, labels=store_labels)
     output_stats_dict = benchmark_run.calc_output_stats(store_outputs, model, eval_score)
     benchmark_run.print_output_stats()
+    
     return output_stats_dict
 
 
@@ -586,6 +605,7 @@ if __name__ == "__main__":
         help="The number of tokens to run text generation models only.",
     )
     parser.add_argument("--chips", default=1, type=int, help="Number of chips to run benchmark on.")
+    parser.add_argument("--iter", default=1, type=int, help="Number of iterations to run the benchmark for.")
     parser.add_argument("--recompute", action="store_true", help="Enable recompute in training")
     parser.add_argument(
         "--trace",
@@ -713,6 +733,20 @@ if __name__ == "__main__":
                 name, value = e.split("=")
             os.environ[name] = value
 
+    # cushorts: added data parallelism support
+    #"""
+    if args.device =="cuda":
+        dist.init_process_group("nccl")
+        local_rank = int(os.environ["LOCAL_RANK"])
+        torch.cuda.set_device(local_rank)
+    #"""
+    
+    # cushorts: power setup
+    #pynvml.nvmlInit()
+    #handle = pynvml.nvmlDeviceGetHandleByIndex(0) # GPU 0
+    #def nvidia_get_power():
+    #    return pynvml.nvmlDeviceGetPowerUsage(handle) / 1000  # Watts
+
     # Load model and run benchmark
     kwargs = {
         "training": args.training,
@@ -735,46 +769,58 @@ if __name__ == "__main__":
     logger.info(f" kwargs: {kwargs}")
     model, generator, eval_fn = models[args.model]["func"](benchmark_run=benchmark_run, **kwargs)
     error = False
+    
+    #cushorts: multiple run iterations
+    for i in range(args.iter):
+        try:
+            result = run(args, model, generator, eval_fn, benchmark_run)
+        except RuntimeError as e:
+            result = {
+                "args": vars(args),
+                "samples_per_sec": 0.0,
+                "error": str(e),
+                "machine_name": socket.gethostname(),
+            }
+            print("Error encountered while running benchmark: ", e)
+            traceback.print_exc()
+            error = True
+
+        # Store outputs
+        if args.save_output:
+            result.update(vars(args))
+            fname = f"perf_{args.model}_{args.config}_{result.get('input_size', 'na')}_{args.device}_mb{args.microbatch}_{benchmark_run.short_run_id}_gpu{local_rank}_i{i}.json"
+            fname = fname.replace("/", "_")  # escape fnames
+            out_file = pathlib.Path("results", fname)
+
+            # Creates result dir if models are run out of the benchmarking repo
+            os.makedirs(os.path.dirname(out_file), exist_ok=True)
+
+            all_results = []
+            if os.path.exists(out_file):
+                try:
+                    with open(out_file, "r") as f:
+                        print("Reading in ", out_file, " with previous data")
+                        all_results = json.loads(f.read())
+                except Exception as e:
+                    print(
+                        f"{str(e)}: Failed to load previous results, Will not overwrite, but create a different output file."
+                    )
+                    out_file = "post_error_" + out_file
+
+            all_results.append(result)
+            with open(out_file, "w") as f:
+                f.write(json.dumps(all_results))
+
+            print("Written out ", out_file, " with summary")
+
+    # cushorts: Clean up distributed training and power monitoring
     try:
-        result = run(args, model, generator, eval_fn, benchmark_run)
-    except RuntimeError as e:
-        result = {
-            "args": vars(args),
-            "samples_per_sec": 0.0,
-            "error": str(e),
-            "machine_name": socket.gethostname(),
-        }
-        print("Error encountered while running benchmark: ", e)
-        traceback.print_exc()
-        error = True
-
-    # Store outputs
-    if args.save_output:
-        result.update(vars(args))
-        fname = f"perf_{args.model}_{args.config}_{result.get('input_size', 'na')}_{args.device}_mb{args.microbatch}_{benchmark_run.short_run_id}.json"
-        fname = fname.replace("/", "_")  # escape fnames
-        out_file = pathlib.Path("results", fname)
-
-        # Creates result dir if models are run out of the benchmarking repo
-        os.makedirs(os.path.dirname(out_file), exist_ok=True)
-
-        all_results = []
-        if os.path.exists(out_file):
-            try:
-                with open(out_file, "r") as f:
-                    print("Reading in ", out_file, " with previous data")
-                    all_results = json.loads(f.read())
-            except Exception as e:
-                print(
-                    f"{str(e)}: Failed to load previous results, Will not overwrite, but create a different output file."
-                )
-                out_file = "post_error_" + out_file
-
-        all_results.append(result)
-        with open(out_file, "w") as f:
-            f.write(json.dumps(all_results))
-
-        print("Written out ", out_file, " with summary")
+        if 'handle' in locals() and handle is not None:
+            pynvml.nvmlShutdown()
+    except:
+        pass
+    if dist.is_initialized():
+        dist.destroy_process_group()
 
     if error:
         exit(2)
