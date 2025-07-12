@@ -39,7 +39,7 @@ def falcon(
         os.environ["PYBUDA_TEMP_ENABLE_NEW_SPARSE_ESTIMATES"] = "1"
         os.environ["PYBUDA_EXP_APPROX"] = "1"
         os.environ["TT_BACKEND_OVERLAY_MAX_EXTRA_BLOB_SIZE"] = "233472"
-
+        
     # Set model parameters based on chosen task and model configuration
     if task in ["na", "hellaswag", "text_summarization", "alpacaeval"]:
         if config == "7b":
@@ -103,13 +103,29 @@ def falcon(
         benchmark_run.count_prompt_tokens = True
 
     else:
+        # Fix device assignment for GPU
+        if device == "cuda":
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            torch.cuda.set_device(local_rank)
+            device_id = local_rank
+            torch_device = f"cuda:{local_rank}"
+        else:
+            device_id = -1  # Use CPU
+            torch_device = "cpu"
+
         device = 0 if device == "cuda" else -1
         tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
         tokenizer.pad_token_id = tokenizer.eos_token_id
         benchmark_run.tokenizer = tokenizer
+
         if task == "hellaswag":
             # in order to get logits or loss we use the CausalLM implementation
             falcon_model = FalconForCausalLM.from_pretrained(model_name)
+            
+            if torch_device != "cpu":
+                falcon_model = falcon_model.to(torch_device)
+                # Also set the appropriate dtype
+                falcon_model = falcon_model.to(dtype=torch_df_from_str(data_type))
 
             def model_wrapper(batch):
                 # this wrapper is necessary because the batch inputs have different token lengths
@@ -119,6 +135,9 @@ def falcon(
                 # indexes would no longer be the same as the TT implementation
                 outputs = []
                 for prompt in batch:
+                    # Move input to the same device as model
+                    if torch_device != "cpu":
+                        input_ids = input_ids.to(torch_device)
                     input_ids = tokenizer(prompt, padding=True, return_tensors="pt").input_ids
                     outputs.append(falcon_model(input_ids, labels=input_ids).logits.squeeze(0))
                 return outputs
@@ -129,11 +148,16 @@ def falcon(
                 "text-generation",
                 model=model_name,
                 tokenizer=tokenizer,
-                device=device,
+                device=device_id,
                 torch_dtype=torch_df_from_str(data_type),
                 return_dict=True,
                 output_hidden_states=True,
             )
+
+            # Verify the model is on the right device
+            if hasattr(model, 'model') and hasattr(model.model, 'device'):
+                print(f"Model device: {model.model.device}")
+
             # set model parameters
             model.model.config.early_stopping = True
             model.model.config.length_penalty = 1.0

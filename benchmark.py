@@ -23,6 +23,8 @@ from diffusers import StableDiffusionPipeline
 from transformers.tokenization_utils_base import BatchEncoding
 
 import pynvml
+import builtins
+from transformers import Text2TextGenerationPipeline
 
 # Models
 import benchmark.models.bert.bert
@@ -734,19 +736,16 @@ if __name__ == "__main__":
             os.environ[name] = value
 
     # cushorts: added data parallelism support
-    #"""
     if args.device =="cuda":
         dist.init_process_group("nccl")
         local_rank = int(os.environ["LOCAL_RANK"])
         torch.cuda.set_device(local_rank)
-    #"""
+        if local_rank != 0:
+            def silent_print(*args, **kwargs):
+                pass
+            builtins.print = silent_print
+        print(f"Parallelization initialized coming from rank {local_rank}")
     
-    # cushorts: power setup
-    #pynvml.nvmlInit()
-    #handle = pynvml.nvmlDeviceGetHandleByIndex(0) # GPU 0
-    #def nvidia_get_power():
-    #    return pynvml.nvmlDeviceGetPowerUsage(handle) / 1000  # Watts
-
     # Load model and run benchmark
     kwargs = {
         "training": args.training,
@@ -769,7 +768,23 @@ if __name__ == "__main__":
     logger.info(f" kwargs: {kwargs}")
     model, generator, eval_fn = models[args.model]["func"](benchmark_run=benchmark_run, **kwargs)
     error = False
-    
+
+    # ---- special‑case when the factory returns a HF pipeline ----
+    #"""
+    if isinstance(model, Text2TextGenerationPipeline):
+        ddp = torch.nn.parallel.DistributedDataParallel(
+            model.model.to(local_rank),
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=False,
+        )
+
+        ddp.config = ddp.module.config
+        ddp.generate = ddp.module.generate
+
+        model.model  = ddp
+        model.device = torch.device(f"cuda:{local_rank}")
+    #"""
     #cushorts: multiple run iterations
     for i in range(args.iter):
         try:
