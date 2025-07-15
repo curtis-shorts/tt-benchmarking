@@ -135,14 +135,15 @@ def falcon(
                 # indexes would no longer be the same as the TT implementation
                 outputs = []
                 for prompt in batch:
+                    input_ids = tokenizer(prompt, padding=True, return_tensors="pt").input_ids
                     # Move input to the same device as model
                     if torch_device != "cpu":
                         input_ids = input_ids.to(torch_device)
-                    input_ids = tokenizer(prompt, padding=True, return_tensors="pt").input_ids
                     outputs.append(falcon_model(input_ids, labels=input_ids).logits.squeeze(0))
                 return outputs
 
             model = model_wrapper
+
         else:
             model = pipeline(
                 "text-generation",
@@ -169,7 +170,7 @@ def falcon(
             model.model.config.num_return_sequences = 1
             # set key for accessing output text
             model.output_key = "generated_text"
-
+    
     # Task specific configuration
     if task == "na":
 
@@ -252,6 +253,60 @@ def falcon(
                         end_idx = len(out) - offset
                         start_idx = end_idx - len(lbl["end_ids"])
                     eval_out = out.squeeze(0)[start_idx:end_idx, :]
+                    
+                    # Ensure both tensors are on the same device
+                    end_ids = lbl["end_ids"]
+                    if hasattr(eval_out, 'device') and eval_out.device.type != 'cpu':
+                        # Move end_ids to the same device as eval_out
+                        end_ids = end_ids.to(eval_out.device)
+                    
+                    conf_dict[lbl["ind"]].append(
+                        torch.gather(
+                            torch.nn.functional.softmax(eval_out, dim=-1),
+                            1,
+                            end_ids.unsqueeze(1),
+                        ).mean()
+                    )
+                    labels_dict[lbl["ind"]] = int(lbl["label"])
+
+            for ind, conf_list in conf_dict.items():
+                pred_labels.append(torch.stack(conf_list).argmax().item())
+                true_labels.append(labels_dict[ind])
+
+            accuracy_metric = evaluate.load("accuracy")
+            calc_metric = accuracy_metric.compute(references=true_labels, predictions=pred_labels)
+            eval_score = calc_metric["accuracy"]
+            return eval_score
+        
+        """
+        def eval_fn(outputs, labels):
+            pred_labels = []
+            true_labels = []
+            # get option selection for each query, mapped by
+            conf_dict = defaultdict(list)
+            labels_dict = {}
+            for b_out, b_lbl in zip(outputs, labels):
+                for out, lbl in zip(b_out, b_lbl):
+                    if isinstance(out, list):
+                        out = torch.stack(out)
+                    # an offset is needed to compare the predicted token with the label token
+                    offset = 1
+                    start_idx = len(lbl["prompt_ids"]) - offset
+                    end_idx = start_idx + len(lbl["end_ids"])
+                    if end_idx > (len(out) - offset):
+                        # NOTE: an ending or prompt may be tokenized to fewer tokens when tokenized
+                        # together than when tokenized separately due to spacing handling. For example:
+                        # >>> tokenizer.decode([18943], clean_spaces=True)
+                        #    ' demonstrates'
+                        # >>> tokenizer.decode([10985,   245,  2266,   750,], clean_spaces=True)
+                        #    'demonstrates'
+                        # this affects all hardware implmentations the same so it is not a problem for relative comparison
+                        # another possible implementation option would be to add leading or trailing space
+                        # and remove any space tokens that were added to the output, explictily checking for
+                        # this edge case on both LH and RH sides of prompt / ending
+                        end_idx = len(out) - offset
+                        start_idx = end_idx - len(lbl["end_ids"])
+                    eval_out = out.squeeze(0)[start_idx:end_idx, :]
                     conf_dict[lbl["ind"]].append(
                         torch.gather(
                             torch.nn.functional.softmax(eval_out, dim=-1),
@@ -269,6 +324,7 @@ def falcon(
             calc_metric = accuracy_metric.compute(references=true_labels, predictions=pred_labels)
             eval_score = calc_metric["accuracy"]
             return eval_score
+        """
 
     elif task == "text_summarization":
 

@@ -25,6 +25,7 @@ from transformers.tokenization_utils_base import BatchEncoding
 import pynvml
 import builtins
 from transformers import Text2TextGenerationPipeline
+from transformers import AutomaticSpeechRecognitionPipeline
 
 # Models
 import benchmark.models.bert.bert
@@ -735,10 +736,11 @@ if __name__ == "__main__":
                 name, value = e.split("=")
             os.environ[name] = value
 
-    # cushorts: added data parallelism support
+    # GPU data parallelism support
     if args.device =="cuda":
         dist.init_process_group("nccl")
         local_rank = int(os.environ["LOCAL_RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
         torch.cuda.set_device(local_rank)
         if local_rank != 0:
             def silent_print(*args, **kwargs):
@@ -763,14 +765,26 @@ if __name__ == "__main__":
                 kwargs["config"] = models[args.model]["configs"][0]
             else:
                 kwargs["config"] = args.config
-    benchmark_run = BenchmarkRun(args=args)
-    logger.info(f" creating benchmarking run: {func.__name__}")
-    logger.info(f" kwargs: {kwargs}")
-    model, generator, eval_fn = models[args.model]["func"](benchmark_run=benchmark_run, **kwargs)
-    error = False
-
-    # ---- special‑case when the factory returns a HF pipeline ----
-    #"""
+    
+    # Falcon model is so large that caesar can only fit 2 in system memory at a time
+    if args.model == "falcon" and args.device == "cuda":
+        # Sequential loading - one rank at a time
+        for rank in range(0, world_size, 2):
+            if local_rank == rank or local_rank == (rank + 1):
+                benchmark_run = BenchmarkRun(args=args)
+                logger.info(f" creating benchmarking run: {func.__name__}")
+                logger.info(f" kwargs: {kwargs}")
+                model, generator, eval_fn = models[args.model]["func"](benchmark_run=benchmark_run, **kwargs)
+                error = False
+            dist.barrier()
+    else:
+        benchmark_run = BenchmarkRun(args=args)
+        logger.info(f" creating benchmarking run: {func.__name__}")
+        logger.info(f" kwargs: {kwargs}")
+        model, generator, eval_fn = models[args.model]["func"](benchmark_run=benchmark_run, **kwargs)
+        error = False
+    
+    # Parallelism handling for HF pipeline models (t5 and flant5)
     if isinstance(model, Text2TextGenerationPipeline):
         ddp = torch.nn.parallel.DistributedDataParallel(
             model.model.to(local_rank),
@@ -784,8 +798,22 @@ if __name__ == "__main__":
 
         model.model  = ddp
         model.device = torch.device(f"cuda:{local_rank}")
-    #"""
-    #cushorts: multiple run iterations
+    elif isinstance(model, AutomaticSpeechRecognitionPipeline):
+        ddp = torch.nn.parallel.DistributedDataParallel(
+            model.model.to(local_rank),
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=False,
+        )
+
+        ddp.config = ddp.module.config
+        ddp.generate = ddp.module.generate
+        ddp.get_encoder = ddp.module.get_encoder
+
+        model.model  = ddp
+        model.device = torch.device(f"cuda:{local_rank}")
+    
+    # Execute multiple run iterations for output averaging
     for i in range(args.iter):
         try:
             result = run(args, model, generator, eval_fn, benchmark_run)

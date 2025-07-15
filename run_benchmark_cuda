@@ -3,7 +3,7 @@
 # Start benchmarking
 echo "Running TT-Model Power Benchmarking on CUDA"
 
-iterations=10
+iterations=1 #10
 gpu_counts=( 1 2 4 )
 
 function execution_helper {
@@ -36,24 +36,26 @@ function execution_helper {
 # YOLOv5 - Object Detecton - COCO - ['s']
 
 models=(
-    "-m bert -c large --task text_classification --loop_count 4 -mb 64" \
-    "-m deit -c base --task image_classification -df Fp16 -mb 64 --loop_count 4" \
-    "-m falcon -c 7b-instruct --task hellaswag -df Fp16 -mb 32 --loop_count 1" \
-    "-m flant5 -c large --task text_summarization -df Fp16 -mb 1 --loop_count 1" \
-    "-m hrnet -c v2_w64 --task image_classification -df Fp16 -mb 64 --loop_count 4" \
-    "-m inception_v4 -c 224 --task image_classification -df Fp16 -mb 64 --loop_count 8" \
-    "-m mobilenetv1 -c 224 --task image_classification -df Fp16 -mb 64 --loop_count 8" \
-    "-m mobilenetv2 -c 224 --task image_classification -df Fp16 -mb 64 --loop_count 8" \
-    "-m mobilenetv3 -c lg --task image_classification -df Fp16 -mb 64 --loop_count 8" \
-    "-m open_pose -c 2d --task pose_estimation -mb 64 -df Fp16 --loop_count 16" \
-    "-m resnet -c resnet50 --task image_classification -df Fp16 -mb 64 --loop_count 8" \
-    "-m stable_diffusion -c v1-4 --task image_generation -df Fp16 -mb 1 --loop_count 1"
-    "-m t5 -c large --task text_summarization -df Fp16 -mb 1 --loop_count 1" \
-    "-m unet -c 256 --task segmentation -df Fp16 -mb 48 --loop_count 8" \
-    "-m vit -c base --task image_classification -df Fp16 -mb 64 --loop_count 4" \
-    "-m vovnet_v2 -c 39 --task image_classification -df Fp16 -mb 64 --loop_count 8" \
-    "-m whisper -c small --task asr -df Fp32 -mb 1 --loop_count 1" \
-    "-m yolo_v5 -c s --task object_detection -df Fp16 -mb 64 --loop_count 8" \
+# Image classification:
+    "-m deit -c base --task image_classification -df Fp16 -mb 256 --loop_count 64" \
+    "-m hrnet -c v2_w64 --task image_classification -df Fp16 -mb 256 --loop_count 32" \
+    "-m inception_v4 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 64" \
+    "-m mobilenetv1 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 128" \
+    "-m mobilenetv2 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 128" \
+    "-m mobilenetv3 -c lg --task image_classification -df Fp16 -mb 256 --loop_count 128" \
+    "-m resnet -c resnet50 --task image_classification -df Fp16 -mb 256 --loop_count 64" \
+    "-m vit -c base --task image_classification -df Fp16 -mb 256 --loop_count 64" \
+    "-m vovnet_v2 -c 39 --task image_classification -df Fp16 -mb 256 --loop_count 64" \
+# Others:
+    "-m bert -c large --task text_classification -mb 256 --loop_count 8" \
+    "-m yolo_v5 -c s --task object_detection -df Fp16 -mb 256 --loop_count 64" \
+    "-m flant5 -c large --task text_summarization -df Fp16 -mb 8 --loop_count 32" \
+    "-m t5 -c large --task text_summarization -df Fp16 -mb 16 --loop_count 8" \
+    "-m falcon -c 7b-instruct --task hellaswag -df Fp16 -mb 16 --loop_count 2" \
+    "-m open_pose -c 2d --task pose_estimation -df Fp16 -mb 64 --loop_count 512" \
+    "-m unet -c 256 --task segmentation -df Fp16 -mb 64 --loop_count 128" \
+    "-m stable_diffusion -c v1-4 --task image_generation -df Fp16 -mb 4 --loop_count 4" \
+    "-m whisper -c small --task asr -df Fp32 -mb 4 --loop_count 4" \
 )
 
 for next_model in "${models[@]}"; do
@@ -61,10 +63,10 @@ for next_model in "${models[@]}"; do
         echo "Running next model with ${gpu_count} gpu and settings: $next_model"
         echo "Executing $iterations iterations"
         SECONDS=0
-        results_dir="testing_results/caesar_traditional_${gpu_count}_gpu"
+        results_dir="testing_results/caesar_cdi_${gpu_count}_gpu"
         if [ ! -d $results_dir ]; then mkdir $results_dir; fi
         ln -s $results_dir results
-        execution_helper "${next_model}" ${gpu_count} 1>> $results_dir/runtime.out 2>> $results_dir/runtime.err
+        execution_helper "${next_model}" ${gpu_count} #1>> $results_dir/runtime.out 2>> $results_dir/runtime.err
         echo "Completed in $SECONDS s"
         echo
         rm results
