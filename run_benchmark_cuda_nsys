@@ -9,13 +9,13 @@ gpu_counts=( 1 2 4 )
 function execution_helper {
     model="$1"
     gpus=$2
-    #python benchmark.py -d cuda ${model} --save_output 
     
-    nsys profile --trace=cuda --sample=cpu --output ${results_dir}/cdi_${model}_${gpus}gpu \
-            --backtrace=lbr --cudabacktrace=all --gpu-metrics-devices=all \
-            --force-overwrite true --gpu-metrics-frequency=20000 \
-            --cuda-memory-usage=true --delay $start_delay --duration $max_run_duration \
-    torchrun --nproc-per-node $gpus benchmark.py -d cuda ${model} --iter $iterations --save_output
+    model_name=`echo $model | awk '{print $2}'`
+    trace_out=${results_dir}/cdi_${model_name}_${gpus}gpu
+    
+    nsys profile --trace=cuda --sample=cpu --output=$trace_out --backtrace=lbr \
+            --cudabacktrace=all --force-overwrite true --cuda-memory-usage=true \
+        torchrun --nproc-per-node $gpus benchmark.py -d cuda ${model} --iter $iterations --save_output
 }
 
 ####################### MODELS ####################### 
@@ -81,6 +81,7 @@ for next_model in "${models[@]}"; do
         echo "Completed in $SECONDS s"
         echo
         rm results
+        exit
     done
 done
 
