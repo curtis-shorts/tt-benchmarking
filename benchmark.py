@@ -784,33 +784,12 @@ if __name__ == "__main__":
         model, generator, eval_fn = models[args.model]["func"](benchmark_run=benchmark_run, **kwargs)
         error = False
     
-    # Parallelism handling for HF pipeline models (t5 and flant5)
+    # Parallelism handling for HF pipeline models (Text: t5, flant5; Speech: Whisper)
     if isinstance(model, Text2TextGenerationPipeline):
-        ddp = torch.nn.parallel.DistributedDataParallel(
-            model.model.to(local_rank),
-            device_ids=[local_rank],
-            output_device=local_rank,
-            find_unused_parameters=False,
-        )
-
-        ddp.config = ddp.module.config
-        ddp.generate = ddp.module.generate
-
-        model.model  = ddp
+        model.model = model.model.to(local_rank)
         model.device = torch.device(f"cuda:{local_rank}")
     elif isinstance(model, AutomaticSpeechRecognitionPipeline):
-        ddp = torch.nn.parallel.DistributedDataParallel(
-            model.model.to(local_rank),
-            device_ids=[local_rank],
-            output_device=local_rank,
-            find_unused_parameters=False,
-        )
-
-        ddp.config = ddp.module.config
-        ddp.generate = ddp.module.generate
-        ddp.get_encoder = ddp.module.get_encoder
-
-        model.model  = ddp
+        model.model = model.model.to(local_rank)
         model.device = torch.device(f"cuda:{local_rank}")
     
     # Execute multiple run iterations for output averaging
