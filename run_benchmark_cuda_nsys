@@ -1,0 +1,86 @@
+#!/bin/bash
+
+# Start benchmarking
+echo "Running TT-Model Power Benchmarking on CUDA"
+
+iterations=1 #10
+gpu_counts=( 1 2 4 )
+
+function execution_helper {
+    model="$1"
+    gpus=$2
+    #python benchmark.py -d cuda ${model} --save_output 
+    
+    nsys profile --trace=cuda --sample=cpu --output ${results_dir}/cdi_${model}_${gpus}gpu \
+            --backtrace=lbr --cudabacktrace=all --gpu-metrics-devices=all \
+            --force-overwrite true --gpu-metrics-frequency=20000 \
+            --cuda-memory-usage=true --delay $start_delay --duration $max_run_duration \
+    torchrun --nproc-per-node $gpus benchmark.py -d cuda ${model} --iter $iterations --save_output
+}
+
+####################### MODELS ####################### 
+# Model - Tasks - Datasets - Model Sizes
+# BERT - Text Classification / Keyword Extraction - SST-2 - ['tiny', 'base', 'large']
+# DeiT - Image Classification - ImageNet - ['base', 'small']
+# Falcon - Text Generationi (hellaswag) / ___ (alpacaeval) / Text Summarization - ['7b', '7b-instruct']
+# FLAN-T5 - Text Summarization / Text Classification- CNN Dailymail - ['small', 'base', 'large']
+# HRNet - Image Classification - ImageNet - ['w18', 'v2_w18', 'v2_w30', 'v2_w32', 'v2_w40', 'v2_w44', 'v2_w48', 'v2_w64']
+# Inception-v4 - Image Classification - ImageNet - ['224']
+# MobileNetV1 - Image Classification - ImageNet - ['192', '224']
+# MobileNetV2 - Image Classification - ImageNet - ['224', '160', '96']
+# MobileNetV3 - Image Classification - ImageNet - ['sm', 'lg']
+# OpenPose - Pose Estimation - COCO keypoints - ['2d', '3d']
+# ResNet - Image Classification - ImageNet - ['resnet18', 'resnet50']
+# Stable Diffusion - Image Generation - ['v1-4']
+# T5 - Text Summarization / Text Classification- CNN Dailymail - ['small', 'base', 'large']
+# U-Net - Segmentation - Brain LGG Dataset - ['256']
+# ViT - Image Classification - ImageNet - ['base', 'large']
+# VoVNet v1 - Image Classification - ImageNet - ['27s', '39', '57']
+# VoVNet v2 - Image Classification - ImageNet - ['19', '39', '99']
+# Whisper - ASR - LibriSpeech - ['tiny', 'base', 'small', 'medium', 'large']
+# YOLOv5 - Object Detecton - COCO - ['s']
+
+models=(
+    "-m bert -c large --task text_classification -mb 256 --loop_count 8" \
+    "-m deit -c base --task image_classification -df Fp16 -mb 256 --loop_count 64" \
+    "-m mobilenetv3 -c lg --task image_classification -df Fp16 -mb 256 --loop_count 256" \
+    "-m whisper -c small --task asr -df Fp32 -mb 4 --loop_count 4" \
+    "-m yolo_v5 -c s --task object_detection -df Fp16 -mb 256 --loop_count 128" \
+## Image classification:
+#    "-m deit -c base --task image_classification -df Fp16 -mb 256 --loop_count 64" \
+#    "-m hrnet -c v2_w64 --task image_classification -df Fp16 -mb 256 --loop_count 32" \
+#    "-m inception_v4 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 64" \
+#    "-m mobilenetv1 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 256" \
+#    "-m mobilenetv2 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 128" \
+#    "-m mobilenetv3 -c lg --task image_classification -df Fp16 -mb 256 --loop_count 256" \
+#    "-m resnet -c resnet50 --task image_classification -df Fp16 -mb 256 --loop_count 128" \
+#    "-m vit -c base --task image_classification -df Fp16 -mb 256 --loop_count 64" \
+#    "-m vovnet_v2 -c 39 --task image_classification -df Fp16 -mb 256 --loop_count 128" \
+## Others:
+#    "-m bert -c large --task text_classification -mb 256 --loop_count 8" \
+#    "-m yolo_v5 -c s --task object_detection -df Fp16 -mb 256 --loop_count 128" \
+#    "-m flant5 -c large --task text_summarization -df Fp16 -mb 8 --loop_count 32" \
+#    "-m t5 -c large --task text_summarization -df Fp16 -mb 16 --loop_count 16" \
+#    "-m falcon -c 7b-instruct --task hellaswag -df Fp16 -mb 16 --loop_count 4" \
+#    "-m open_pose -c 2d --task pose_estimation -df Fp16 -mb 64 --loop_count 512" \
+#    "-m unet -c 256 --task segmentation -df Fp16 -mb 64 --loop_count 256" \
+#    "-m stable_diffusion -c v1-4 --task image_generation -df Fp16 -mb 4 --loop_count 16" \
+#    "-m whisper -c small --task asr -df Fp32 -mb 4 --loop_count 4" \
+)
+
+for next_model in "${models[@]}"; do
+    for gpu_count in ${gpu_counts[@]}; do
+        echo "Running next model with ${gpu_count} gpu and settings: $next_model"
+        echo "Executing $iterations iterations"
+        SECONDS=0
+        #results_dir="testing_results/caesar_cdi_${gpu_count}_gpu"
+        results_dir="testing_results/nsys_caesar_cdi_${gpu_count}_gpu"
+        if [ ! -d $results_dir ]; then mkdir $results_dir; fi
+        ln -s $results_dir results
+        execution_helper "${next_model}" ${gpu_count} 1>> $results_dir/runtime.out 2>> $results_dir/runtime.err
+        echo "Completed in $SECONDS s"
+        echo
+        rm results
+    done
+done
+
