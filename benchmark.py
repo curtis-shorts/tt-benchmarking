@@ -206,6 +206,7 @@ def run(
                 output_dir=output_dir,
             )
 
+            benchmark_run.monitor_power = 1
             power_thread = threading.Thread(target=benchmark_run.nvidia_power_monitor)
             power_thread.start()
             benchmark_run.start_benchmark_timer()
@@ -235,6 +236,7 @@ def run(
                         store_outputs.append(output)
             benchmark_run.end_benchmark_timer()
             benchmark_run.stop_monitoring = True
+            benchmark_run.monitor_power = 0
             power_thread.join()
             runner.shutdown()
 
@@ -458,6 +460,7 @@ def run(
             )
 
         else:
+            benchmark_run.monitor_power = 1
             power_thread = threading.Thread(target=benchmark_run.nvidia_power_monitor)
             power_thread.start()
             benchmark_run.start_benchmark_timer()
@@ -480,6 +483,7 @@ def run(
             benchmark_run.end_benchmark_timer()
             
             benchmark_run.stop_monitoring = True
+            benchmark_run.monitor_power = 0
             power_thread.join()
 
         # Combine outputs for data parallel runs
@@ -503,6 +507,7 @@ def run(
             }
     else:
         # cuda, CPU, or TT device with pybuda_pipeline implementations
+        benchmark_run.monitor_power = 1
         power_thread = threading.Thread(target=benchmark_run.nvidia_power_monitor)
         power_thread.start()
         benchmark_run.start_benchmark_timer()
@@ -531,6 +536,7 @@ def run(
                         store_outputs.append(output)
         benchmark_run.end_benchmark_timer()
         benchmark_run.stop_monitoring = True
+        benchmark_run.monitor_power = 0
         power_thread.join()
 
     # Store model output
@@ -742,10 +748,12 @@ if __name__ == "__main__":
         local_rank = int(os.environ["LOCAL_RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         torch.cuda.set_device(local_rank)
+
         if local_rank != 0:
             def silent_print(*args, **kwargs):
                 pass
             builtins.print = silent_print
+        
         print(f"Parallelization initialized coming from rank {local_rank}")
     
     # Load model and run benchmark

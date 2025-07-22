@@ -3,8 +3,8 @@
 # Start benchmarking
 echo "Running TT-Model Power Benchmarking on CUDA"
 
-iterations=1 #10
-gpu_counts=( 1 2 4 )
+iterations=2 #10
+gpu_counts=2 #( 1 2 )
 
 function execution_helper {
     model="$1"
@@ -12,9 +12,11 @@ function execution_helper {
     
     model_name=`echo $model | awk '{print $2}'`
     trace_out=${results_dir}/cdi_${model_name}_${gpus}gpu
-    
-    nsys profile --trace=cuda --sample=cpu --output=$trace_out --backtrace=lbr \
-            --cudabacktrace=all --force-overwrite true --cuda-memory-usage=true \
+  cs-devices argument 
+    nsys profile --trace=cuda,mpi,ucx,nvtx --sample=cpu --output=$trace_out --backtrace=lbr \
+                --cudabacktrace=all --gpu-metrics-devices=cuda-visible --force-overwrite true \
+                --gpu-metrics-frequency=20000 --cuda-memory-usage=true \
+                --duration=30 \
         torchrun --nproc-per-node $gpus benchmark.py -d cuda ${model} --iter $iterations --save_output
 }
 
@@ -41,6 +43,8 @@ function execution_helper {
 # YOLOv5 - Object Detecton - COCO - ['s']
 
 models=(
+    "-m whisper -c small --task asr -df Fp32 -mb 2 --loop_count 2" \
+    
     "-m bert -c large --task text_classification -mb 256 --loop_count 8" \
     "-m deit -c base --task image_classification -df Fp16 -mb 256 --loop_count 64" \
     "-m mobilenetv3 -c lg --task image_classification -df Fp16 -mb 256 --loop_count 256" \
@@ -74,10 +78,10 @@ for next_model in "${models[@]}"; do
         echo "Executing $iterations iterations"
         SECONDS=0
         #results_dir="testing_results/caesar_cdi_${gpu_count}_gpu"
-        results_dir="testing_results/nsys_caesar_cdi_${gpu_count}_gpu"
+        results_dir="testing_results/nsys_caesar_traditional_${gpu_count}_gpu"
         if [ ! -d $results_dir ]; then mkdir $results_dir; fi
         ln -s $results_dir results
-        execution_helper "${next_model}" ${gpu_count} 1>> $results_dir/runtime.out 2>> $results_dir/runtime.err
+        execution_helper "${next_model}" ${gpu_count} #1>> $results_dir/runtime.out 2>> $results_dir/runtime.err
         echo "Completed in $SECONDS s"
         echo
         rm results

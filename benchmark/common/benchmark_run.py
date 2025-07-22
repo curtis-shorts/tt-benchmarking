@@ -115,6 +115,7 @@ class BenchmarkRun:
         self.tokenizer = None
         self.peak_cpu_mem = 0
         # power stats
+        self.monitor_power = 0
         self.watt_measures = []
         self.avg_power = None
         self.energy_value = None
@@ -263,11 +264,13 @@ class BenchmarkRun:
         gpu_index = int(os.environ.get('LOCAL_RANK', 0))
         pynvml.nvmlInit()
         handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_index)
-        time.sleep(0.5) # Wait for steady state
-        while not self.stop_monitoring:
+        #time.sleep(0.5) # Wait for steady state
+        print("Starting nvidia power monitor.")
+        self.watt_measures = []
+        while self.monitor_power:
             wattage = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000  # Watts
             self.watt_measures.append(wattage)
-            time.sleep(0.01)
+            time.sleep(0.1)
 
     def calc_output_stats(self, output, model, eval_score):
         self.eval_score = eval_score
