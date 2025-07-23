@@ -16,6 +16,11 @@ import time
 import traceback
 from typing import Any, Callable, Dict, List, Optional
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, message=r".*torch\.cuda\.amp\.autocast.*")
+warnings.filterwarnings("ignore", category=FutureWarning, message=r".*Please use .* instead\.")
+os.environ["TQDM_DISABLE"] = "1"
+
 import torch
 import torch.distributed as dist
 import transformers

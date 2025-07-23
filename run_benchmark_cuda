@@ -3,8 +3,8 @@
 # Start benchmarking
 echo "Running TT-Model Power Benchmarking on CUDA"
 
-iterations=10
-gpu_counts=( 1 2 )
+iterations=20
+gpu_counts=( 1 2 4 )
 
 function execution_helper {
     model="$1"
@@ -37,25 +37,25 @@ function execution_helper {
 
 models=(
 # Image classification:
-    "-m deit -c base --task image_classification -df Fp16 -mb 256 --loop_count 64" \
-    "-m hrnet -c v2_w64 --task image_classification -df Fp16 -mb 256 --loop_count 32" \
-    "-m inception_v4 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 64" \
+    #"-m deit -c base --task image_classification -df Fp16 -mb 256 --loop_count 64" \
+    #"-m hrnet -c v2_w64 --task image_classification -df Fp16 -mb 256 --loop_count 32" \
+    #"-m inception_v4 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 64" \
     "-m mobilenetv1 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 256" \
     "-m mobilenetv2 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 256" \
     "-m mobilenetv3 -c lg --task image_classification -df Fp16 -mb 256 --loop_count 256" \
-    "-m resnet -c resnet50 --task image_classification -df Fp16 -mb 256 --loop_count 128" \
-    "-m vit -c base --task image_classification -df Fp16 -mb 256 --loop_count 64" \
-    "-m vovnet_v2 -c 39 --task image_classification -df Fp16 -mb 256 --loop_count 128" \
+    #"-m resnet -c resnet50 --task image_classification -df Fp16 -mb 256 --loop_count 128" \
+    #"-m vit -c base --task image_classification -df Fp16 -mb 256 --loop_count 64" \
+    #"-m vovnet_v2 -c 39 --task image_classification -df Fp16 -mb 256 --loop_count 128" \
 # Others:
-    "-m bert -c large --task text_classification -mb 256 --loop_count 16" \
-    "-m yolo_v5 -c s --task object_detection -df Fp16 -mb 256 --loop_count 256" \
-    "-m flant5 -c large --task text_summarization -df Fp16 -mb 8 --loop_count 64" \
-    "-m t5 -c large --task text_summarization -df Fp16 -mb 16 --loop_count 16" \
+    #"-m bert -c large --task text_classification -mb 256 --loop_count 16" \
+    "-m yolo_v5 -c s --task object_detection -df Fp16 -mb 128 --loop_count 256" \
+    #"-m flant5 -c large --task text_summarization -df Fp16 -mb 8 --loop_count 64" \
+    #"-m t5 -c large --task text_summarization -df Fp16 -mb 16 --loop_count 16" \
     "-m falcon -c 7b-instruct --task hellaswag -df Fp16 -mb 16 --loop_count 16" \
-    "-m open_pose -c 2d --task pose_estimation -df Fp16 -mb 64 --loop_count 512" \
-    "-m unet -c 256 --task segmentation -df Fp16 -mb 64 --loop_count 256" \
-    "-m stable_diffusion -c v1-4 --task image_generation -df Fp16 -mb 4 --loop_count 16" \
-    "-m whisper -c small --task asr -df Fp32 -mb 4 --loop_count 16" \
+    #"-m open_pose -c 2d --task pose_estimation -df Fp16 -mb 64 --loop_count 512" \
+    #"-m unet -c 256 --task segmentation -df Fp16 -mb 64 --loop_count 256" \
+    "-m stable_diffusion -c v1-4 --task image_generation -df Fp16 -mb 2 --loop_count 16" \
+    "-m whisper -c small --task asr -df Fp32 -mb 16 --loop_count 16" \
 )
 
 for next_model in "${models[@]}"; do
@@ -66,7 +66,7 @@ for next_model in "${models[@]}"; do
         results_dir="testing_results/caesar_traditional_${gpu_count}_gpu"
         if [ ! -d $results_dir ]; then mkdir $results_dir; fi
         ln -s $results_dir results
-        execution_helper "${next_model}" ${gpu_count} 1>> $results_dir/runtime.out 2>> $results_dir/runtime.err
+        execution_helper "${next_model}" ${gpu_count} #1>> $results_dir/runtime.out 2>> $results_dir/runtime.err
         echo "Completed in $SECONDS s"
         echo
         rm results
