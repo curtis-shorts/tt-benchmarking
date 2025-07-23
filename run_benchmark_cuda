@@ -10,7 +10,13 @@ function execution_helper {
     model="$1"
     gpus=$2
     #python benchmark.py -d cuda ${model} --save_output 
+    #if [ $gpus == 1 ]; then
+    #    affinity=`seq 0 2 127 | paste -sd,`
+    #    taskset -c ${affinity[@]} \
+    #        torchrun --nproc-per-node $gpus benchmark.py -d cuda ${model} --iter $iterations --save_output
+    #else
     torchrun --nproc-per-node $gpus benchmark.py -d cuda ${model} --iter $iterations --save_output
+    #fi
 }
 
 ####################### MODELS ####################### 
@@ -63,10 +69,10 @@ for next_model in "${models[@]}"; do
         echo "Running next model with ${gpu_count} gpu and settings: $next_model"
         echo "Executing $iterations iterations"
         SECONDS=0
-        results_dir="testing_results/caesar_traditional_${gpu_count}_gpu"
+        results_dir="testing_results/caesar_cdi_${gpu_count}_gpu"
         if [ ! -d $results_dir ]; then mkdir $results_dir; fi
         ln -s $results_dir results
-        execution_helper "${next_model}" ${gpu_count} #1>> $results_dir/runtime.out 2>> $results_dir/runtime.err
+        execution_helper "${next_model}" ${gpu_count} 1>> $results_dir/runtime.out 2>> $results_dir/runtime.err
         echo "Completed in $SECONDS s"
         echo
         rm results
