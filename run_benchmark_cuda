@@ -3,9 +3,10 @@
 # Start benchmarking
 echo "Running TT-Model Power Benchmarking on CUDA"
 
-# 20 iter: mobilenetv3 yolo_v5 falcon stable_diffusion
-# 40 iter: mobilenetv1 mobilenetv2 whisper 
-iterations=40
+# 20 iter: mobilenetv3 yolo_v5 falcon stable_diffusion resnet
+# 40 iter: mobilenetv1 mobilenetv2
+# 80 iter: whisper
+iterations=80
 gpu_counts=( 1 2 )
 
 function execution_helper {
@@ -48,8 +49,8 @@ models=(
     #"-m deit -c base --task image_classification -df Fp16 -mb 256 --loop_count 64" \
     #"-m hrnet -c v2_w64 --task image_classification -df Fp16 -mb 256 --loop_count 32" \
     #"-m inception_v4 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 64" \
-    "-m mobilenetv1 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 256" \
-    "-m mobilenetv2 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 256" \
+    #"-m mobilenetv1 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 256" \
+    #"-m mobilenetv2 -c 224 --task image_classification -df Fp16 -mb 256 --loop_count 256" \
     #"-m mobilenetv3 -c lg --task image_classification -df Fp16 -mb 256 --loop_count 256" \
     #"-m resnet -c resnet50 --task image_classification -df Fp16 -mb 256 --loop_count 128" \
     #"-m vit -c base --task image_classification -df Fp16 -mb 256 --loop_count 64" \
@@ -71,7 +72,7 @@ for next_model in "${models[@]}"; do
         echo "Running next model with ${gpu_count} gpu and settings: $next_model"
         echo "Executing $iterations iterations"
         SECONDS=0
-        results_dir="testing_results/caesar_cdi_${gpu_count}_gpu"
+        results_dir="testing_results/caesar_traditional_${gpu_count}_gpu"
         if [ ! -d $results_dir ]; then mkdir $results_dir; fi
         ln -s $results_dir results
         execution_helper "${next_model}" ${gpu_count} 1>> $results_dir/runtime.out 2>> $results_dir/runtime.err
